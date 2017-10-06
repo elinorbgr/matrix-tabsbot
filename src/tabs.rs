@@ -1,26 +1,26 @@
 use std::collections::HashMap;
 
-use std::io::{Result as IoResult};
-use std::fs::{OpenOptions, File};
+use std::io::Result as IoResult;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use super::format_amount;
 
 pub enum SearchError {
     Ambiguous,
-    NotFound
+    NotFound,
 }
 
 /// Stores the balance of the users of a room, in centimes
 #[derive(Serialize, Deserialize)]
 pub struct RoomTab {
-        pub users: HashMap<String, i32>
+    pub users: HashMap<String, i32>,
 }
 
 impl RoomTab {
     pub fn new() -> RoomTab {
         RoomTab {
-            users: HashMap::new()
+            users: HashMap::new(),
         }
     }
 
@@ -62,24 +62,33 @@ impl RoomTab {
 
 #[derive(Serialize, Deserialize)]
 pub struct TabStore {
-    pub rooms: HashMap<String, RoomTab>
+    pub rooms: HashMap<String, RoomTab>,
 }
 
 impl TabStore {
     pub fn new() -> TabStore {
         TabStore {
-            rooms: HashMap::new()
+            rooms: HashMap::new(),
         }
     }
 
     pub fn pay(&mut self, amount: i32, room: String, user: String) {
         let stored = self.rooms
-                         .entry(room).or_insert_with(|| RoomTab::new())
-                         .users.entry(user).or_insert(0);
+            .entry(room)
+            .or_insert_with(|| RoomTab::new())
+            .users
+            .entry(user)
+            .or_insert(0);
         *stored += amount;
     }
 
-    pub fn payto(&mut self, amount: i32, room: String, user: String, search: &str) -> Result<String, SearchError> {
+    pub fn payto(
+        &mut self,
+        amount: i32,
+        room: String,
+        user: String,
+        search: &str,
+    ) -> Result<String, SearchError> {
         let room = self.rooms.entry(room).or_insert_with(|| RoomTab::new());
         let other = room.find_user(search)?;
         *(room.users.entry(user).or_insert(0)) += amount;
@@ -88,7 +97,9 @@ impl TabStore {
     }
 
     pub fn balance(&self, room: &str) -> String {
-        self.rooms.get(room).map(|r| r.format_balance())
+        self.rooms
+            .get(room)
+            .map(|r| r.format_balance())
             .unwrap_or_else(|| "The tab of this room is currently empty.".into())
     }
 
@@ -99,10 +110,11 @@ impl TabStore {
     }
 
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> IoResult<()> {
-        let file = OpenOptions::new().write(true)
-                                     .create(true)
-                                     .truncate(true)
-                                     .open(path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
         ::serde_json::to_writer_pretty(file, self)?;
         Ok(())
     }
@@ -113,4 +125,3 @@ impl TabStore {
         Ok(me)
     }
 }
-
