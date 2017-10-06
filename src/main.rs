@@ -47,9 +47,10 @@ fn parse_amount(txt: &str) -> Option<i32> {
 }
 
 fn format_amount(amount: i32) -> String {
+    let (sign, amount) = if amount < 0 { ("-", -amount) } else { ("", amount) };
     let units = amount/100;
     let cents = amount%100;
-    format!("{}.{}{}", units, if cents < 10 { "0" } else { "" }, cents)
+    format!("{}{}.{}{}", sign, units, if cents < 10 { "0" } else { "" }, cents)
 }
 
 fn main() {
