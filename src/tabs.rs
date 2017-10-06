@@ -6,6 +6,11 @@ use std::path::Path;
 
 use super::format_amount;
 
+pub enum SearchError {
+    Ambiguous,
+    NotFound
+}
+
 /// Stores the balance of the users of a room, in centimes
 #[derive(Serialize, Deserialize)]
 pub struct RoomTab {
@@ -39,6 +44,20 @@ impl RoomTab {
         }
         s
     }
+
+    pub fn find_user(&self, txt: &str) -> Result<String, SearchError> {
+        let mut result = Err(SearchError::NotFound);
+        for name in self.users.keys() {
+            if name.contains(txt) {
+                if let Err(SearchError::NotFound) = result {
+                    result = Ok(name.clone());
+                } else {
+                    return Err(SearchError::Ambiguous);
+                }
+            }
+        }
+        result
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -58,6 +77,14 @@ impl TabStore {
                          .entry(room).or_insert_with(|| RoomTab::new())
                          .users.entry(user).or_insert(0);
         *stored += amount;
+    }
+
+    pub fn payto(&mut self, amount: i32, room: String, user: String, search: &str) -> Result<String, SearchError> {
+        let room = self.rooms.entry(room).or_insert_with(|| RoomTab::new());
+        let other = room.find_user(search)?;
+        *(room.users.entry(user).or_insert(0)) += amount;
+        *(room.users.entry(other.clone()).or_insert(0)) -= amount;
+        Ok(other)
     }
 
     pub fn balance(&self, room: &str) -> String {

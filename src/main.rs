@@ -25,6 +25,14 @@ use rpassword::prompt_password_stdout;
 
 use tabs::*;
 
+
+static PAID_USAGE: &'static str = r#"Usage: !paid <amount> <Any description you like>
+<amount> must be positive, without units, using `.` as cent separator"#;
+
+static PAIDTO_USAGE: &'static str = r#"Usage: !paidto <username> <amount> <Any description you like>
+<amount> must be positive, without units, using `.` as cent separator"#;
+
+
 fn parse_amount(txt: &str) -> Option<i32> {
     let mut splits = txt.split('.').map(|s| (s.len(), s.parse::<i32>()));
     match (splits.next(), splits.next(), splits.next()) {
@@ -124,9 +132,7 @@ fn main() {
                                     let msg = format!("{} paid {} for \"{}\"", sender, format_amount(amount), rest.join(" "));
                                     futs.push(Box::new(mx.send_simple(&rid, msg).map(|_| ())));
                                 } else {
-                                    let body = "Usage: !paid <amount> <Any description you like>\n<amount> must be positive, without units, using `.` as cent separator";
-                                    futs.push(Box::new(mx.send_simple(&rid, body).map(|_| ())));
-                                    // TODO write error
+                                    futs.push(Box::new(mx.send_simple(&rid, PAID_USAGE).map(|_| ())));
                                 },
                                 Some("!balance") => {
                                     // send the balance
@@ -139,7 +145,23 @@ fn main() {
                                     // send it
                                     futs.push(Box::new(mx.send_simple(&rid, store.balance(&rid)).map(|_| ())));
                                 },
-
+                                Some("!paidto") => if let (Some(txt), Some(amount)) = (splits.next(), splits.next().and_then(parse_amount)) {
+                                    let msg = match store.payto(amount, rid.clone(), sender.clone(), &txt) {
+                                        Ok(other) => {
+                                            let rest = splits.collect::<Vec<_>>();
+                                            format!("{} paid {} to {} for \"{}\"", sender, format_amount(amount), other, rest.join(" "))
+                                        },
+                                        Err(SearchError::Ambiguous) => {
+                                            format!("Name \"{}\" is ambiguous.", txt)
+                                        },
+                                        Err(SearchError::NotFound) => {
+                                            format!("Name \"{}\" is unknown.\nTip: they may need to issue a \"!paid 0\" command for me to know them.", txt)
+                                        }
+                                    };
+                                    futs.push(Box::new(mx.send_simple(&rid, msg).map(|_| ())));
+                                } else {
+                                    futs.push(Box::new(mx.send_simple(&rid, PAIDTO_USAGE).map(|_| ())));
+                                },
                                 _ => {}
                             }
                         }
