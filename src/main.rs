@@ -17,9 +17,10 @@ use futures::{Future, Stream};
 use tokio_core::reactor::Core;
 
 use gm::{MatrixClient, MatrixFuture};
+use gm::room::RoomClient;
 use gm::types::messages::Message;
 use gm::types::content::Content;
-use gm::types::events::EventTypes;
+use gm::types::events::{MetaFull, MetaMinimal, Event};
 
 use rpassword::prompt_password_stdout;
 
@@ -126,23 +127,28 @@ fn main() {
         let mut futs: Vec<MatrixFuture<()>> = Vec::new();
 
         // join invite rooms
-        for (rid, _) in sync.rooms.invite {
-            println!("[+] Joining {}", rid);
-            futs.push(Box::new(mx.join(&rid).map(|_| ())));
+        for (room, _) in sync.rooms.invite {
+            println!("[+] Joining {}", room.id);
+            futs.push(Box::new(mx.join(&room.id).map(|_| ())));
         }
 
         // handle messages in joined rooms
-        for (rid, room) in sync.rooms.join {
-            for event in room.timeline.events {
+        for (room, events) in sync.rooms.join {
+            for event in events.timeline.events {
                 // we only check regular messages
-                if let EventTypes::Event(event) = event {
-                    let sender = event.sender;
-                    if let Content::Message(msg) = event.content {
-                        if let Message::Text { body, .. } = msg {
-                            // This is a regular text message, we may need to process it
-                            handle_message(&mut mx, &rid, sender, body, &mut store, &mut futs);
-                        }
+                match event {
+                    Event::Full(
+                        MetaFull { sender, .. },
+                        Content::RoomMessage(Message::Text { body, .. })
+                    ) |
+                    Event::Minimal(
+                        MetaMinimal { sender: Some(sender), .. },
+                        Content::RoomMessage(Message::Text { body, .. })
+                    ) => {
+                        let mut cli = room.cli(&mut mx);
+                        handle_message(&mut cli, sender, body, &mut store, &mut futs);
                     }
+                    _ => {}
                 }
             }
         }
@@ -159,13 +165,13 @@ fn main() {
 }
 
 fn handle_message(
-    mx: &mut MatrixClient,
-    rid: &String,
+    room: &mut RoomClient,
     sender: String,
     body: String,
     store: &mut TabStore,
     futs: &mut Vec<MatrixFuture<()>>,
 ) {
+    let rid = (*room.room.id).to_owned();
     let mut splits = body.split_whitespace();
     match splits.next() {
         Some("!paid") => if let Some(amount) = splits.next().and_then(parse_amount) {
@@ -177,24 +183,24 @@ fn handle_message(
                 format_amount(amount),
                 rest.join(" ")
             );
-            futs.push(Box::new(mx.send_simple(rid, msg).map(|_| ())) as Box<_>);
+            futs.push(Box::new(room.send_simple(msg).map(|_| ())) as Box<_>);
         } else {
-            futs.push(Box::new(mx.send_simple(rid, PAID_USAGE).map(|_| ()))
+            futs.push(Box::new(room.send_simple(PAID_USAGE).map(|_| ()))
                 as Box<_>);
         },
         Some("!balance") => {
             // send the balance
-            futs.push(Box::new(mx.send_simple(rid, store.balance(rid)).map(|_| ())) as Box<_>);
+            futs.push(Box::new(room.send_simple(store.balance(&rid)).map(|_| ())) as Box<_>);
         }
         Some("!rebalance") => {
             // update the balance
             futs.push(Box::new(
-                mx.send_simple(rid, "Rebalancing accounts to 0 mean.")
+                room.send_simple("Rebalancing accounts to 0 mean.")
                     .map(|_| ()),
             ) as Box<_>);
-            store.rebalance(rid);
+            store.rebalance(&rid);
             // send it
-            futs.push(Box::new(mx.send_simple(rid, store.balance(rid)).map(|_| ())) as Box<_>);
+            futs.push(Box::new(room.send_simple(store.balance(&rid)).map(|_| ())) as Box<_>);
         }
         Some("!paidto") => if let (Some(txt), Some(amount)) =
             (splits.next(), splits.next().and_then(parse_amount))
@@ -217,9 +223,9 @@ fn handle_message(
                     txt
                 ),
             };
-            futs.push(Box::new(mx.send_simple(rid, msg).map(|_| ())) as Box<_>);
+            futs.push(Box::new(room.send_simple(msg).map(|_| ())) as Box<_>);
         } else {
-            futs.push(Box::new(mx.send_simple(rid, PAIDTO_USAGE).map(|_| ()))
+            futs.push(Box::new(room.send_simple(PAIDTO_USAGE).map(|_| ()))
                 as Box<_>);
         },
         _ => {}
