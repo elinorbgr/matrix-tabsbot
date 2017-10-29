@@ -7,10 +7,13 @@ extern crate futures;
 extern crate glitch_in_the_matrix as gm;
 extern crate rpassword;
 extern crate tokio_core;
+extern crate clap;
 
 mod tabs;
+mod utils;
+mod config;
 
-use std::{env, io};
+use std::io;
 
 use futures::{Future, Stream};
 
@@ -25,7 +28,8 @@ use gm::types::events::{MetaFull, MetaMinimal, Event};
 use rpassword::prompt_password_stdout;
 
 use tabs::*;
-
+use utils::*;
+use config::*;
 
 static PAID_USAGE: &'static str = r#"Usage: !paid <amount> <Any description you like>
 <amount> must be positive, without units, using `.` as cent separator"#;
@@ -33,72 +37,26 @@ static PAID_USAGE: &'static str = r#"Usage: !paid <amount> <Any description you 
 static PAIDTO_USAGE: &'static str = r#"Usage: !paidto <username> <amount> <Any description you like>
 <amount> must be positive, without units, using `.` as cent separator"#;
 
-
-fn parse_amount(txt: &str) -> Option<i32> {
-    let mut splits = txt.split('.').map(|s| (s.len(), s.parse::<i32>()));
-    match (splits.next(), splits.next(), splits.next()) {
-        (Some((_, Ok(units))), Some((d, Ok(mut cents))), None) => {
-            if d > 2 {
-                return None;
-            } else if d == 1 {
-                cents *= 10;
-            }
-            if units < 0 {
-                return None;
-            }
-            Some(units * 100 + cents)
-        }
-        (Some((_, Ok(units))), None, None) => if units >= 0 {
-            Some(units * 100)
-        } else {
-            None
-        },
-        _ => None,
-    }
-}
-
-fn format_amount(amount: i32) -> String {
-    let (sign, amount) = if amount < 0 {
-        ("-", -amount)
-    } else {
-        ("", amount)
-    };
-    let units = amount / 100;
-    let cents = amount % 100;
-    format!(
-        "{}{}.{}{}",
-        sign,
-        units,
-        if cents < 10 { "0" } else { "" },
-        cents
-    )
-}
-
 fn main() {
     // Read args
-    let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 3 {
-        println!("Usage: matrix-tabs SERVER USERNAME STOREFILE");
-        return;
-    }
-    let (server, username, storefile) = (&args[0], &args[1], &args[2]);
+    let config = Config::from_args();
 
     // init the store
-    let mut store = match TabStore::load_from(storefile) {
+    let mut store = match TabStore::load_from(&config.store_file) {
         Ok(s) => {
-            println!("[+] Loaded tab store from `{}`.", storefile);
+            println!("[+] Loaded tab store from `{}`.", config.store_file);
             s
         }
         Err(err) => match err.kind() {
             io::ErrorKind::NotFound => {
                 println!(
                     "[+] File `{}` does not exist, initializing an empty tab store.",
-                    storefile
+                    config.store_file
                 );
                 TabStore::new()
             }
             _ => {
-                println!("FATAL: cannot open tab store file `{}`: {}", storefile, err);
+                println!("FATAL: cannot open tab store file `{}`: {}", config.store_file, err);
                 return;
             }
         },
@@ -117,9 +75,9 @@ fn main() {
     // setup matrix connexion
     let mut core = Core::new().unwrap();
     let hdl = core.handle();
-    let mut mx = core.run(MatrixClient::login(username, &password, server, &hdl))
+    let mut mx = core.run(MatrixClient::login(&config.username, &password, &config.server, &hdl))
         .unwrap();
-    println!("[+] Connected to {} as {}", server, username);
+    println!("[+] Connected to {} as {}", config.server, config.username);
     let stream = mx.get_sync_stream();
 
     // main loop
@@ -152,10 +110,10 @@ fn main() {
                 }
             }
         }
-        if let Err(err) = store.save_to(storefile) {
+        if let Err(err) = store.save_to(&config.store_file) {
             println!(
                 "ERROR: could not write tab store to `{}`: {}",
-                storefile,
+                config.store_file,
                 err
             );
         }
