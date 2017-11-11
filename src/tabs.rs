@@ -1,9 +1,5 @@
 use std::collections::HashMap;
 
-use std::io::Result as IoResult;
-use std::fs::{File, OpenOptions};
-use std::path::Path;
-
 use super::format_amount;
 
 pub enum SearchError {
@@ -60,7 +56,6 @@ impl RoomTab {
     }
 }
 
-#[derive(Serialize, Deserialize)]
 pub struct TabStore {
     pub rooms: HashMap<String, RoomTab>,
 }
@@ -70,6 +65,14 @@ impl TabStore {
         TabStore {
             rooms: HashMap::new(),
         }
+    }
+
+    pub fn restore(&mut self, room: String, tab: RoomTab) {
+        self.rooms.insert(room, tab);
+    }
+
+    pub fn get(&self, room: &str) -> Option<&RoomTab> {
+        self.rooms.get(room)
     }
 
     pub fn pay(&mut self, amount: i32, room: String, user: String) {
@@ -107,21 +110,5 @@ impl TabStore {
         if let Some(tab) = self.rooms.get_mut(room) {
             tab.rebalance();
         }
-    }
-
-    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> IoResult<()> {
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(path)?;
-        ::serde_json::to_writer_pretty(file, self)?;
-        Ok(())
-    }
-
-    pub fn load_from<P: AsRef<Path>>(path: P) -> IoResult<Self> {
-        let file = File::open(path)?;
-        let me = ::serde_json::from_reader(file)?;
-        Ok(me)
     }
 }
