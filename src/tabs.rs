@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use super::format_amount;
+use matrix_sdk::ruma::{events::{macros::EventContent, EmptyStateKey}, OwnedRoomId, RoomId, UserId};
+use serde::{Serialize, Deserialize};
+
+use crate::utils::format_amount;
 
 pub enum SearchError {
     Ambiguous,
@@ -8,14 +11,15 @@ pub enum SearchError {
 }
 
 /// Stores the balance of the users of a room, in centimes
-#[derive(Serialize, Deserialize)]
-pub struct RoomTab {
+#[derive(Debug, Clone, Serialize, Deserialize, EventContent)]
+#[ruma_event(type = "net.safaradeg.tab", kind = State, state_key_type = EmptyStateKey)]
+pub struct RoomTabContent {
     pub users: HashMap<String, i32>,
 }
 
-impl RoomTab {
-    pub fn new() -> RoomTab {
-        RoomTab {
+impl RoomTabContent {
+    pub fn new() -> RoomTabContent {
+        RoomTabContent {
             users: HashMap::new(),
         }
     }
@@ -57,7 +61,7 @@ impl RoomTab {
 }
 
 pub struct TabStore {
-    pub rooms: HashMap<String, RoomTab>,
+    pub rooms: HashMap<OwnedRoomId, RoomTabContent>,
 }
 
 impl TabStore {
@@ -67,20 +71,20 @@ impl TabStore {
         }
     }
 
-    pub fn restore(&mut self, room: String, tab: RoomTab) {
-        self.rooms.insert(room, tab);
+    pub fn restore(&mut self, room: &RoomId, tab: RoomTabContent) {
+        self.rooms.insert(room.to_owned(), tab);
     }
 
-    pub fn get(&self, room: &str) -> Option<&RoomTab> {
+    pub fn get(&self, room: &RoomId) -> Option<&RoomTabContent> {
         self.rooms.get(room)
     }
 
-    pub fn pay(&mut self, amount: i32, room: String, user: String) {
+    pub fn pay(&mut self, amount: i32, room: &RoomId, user: &UserId) {
         let stored = self.rooms
-            .entry(room)
-            .or_insert_with(|| RoomTab::new())
+            .entry(room.to_owned())
+            .or_insert_with(RoomTabContent::new)
             .users
-            .entry(user)
+            .entry(user.to_string())
             .or_insert(0);
         *stored += amount;
     }
@@ -88,25 +92,25 @@ impl TabStore {
     pub fn payto(
         &mut self,
         amount: i32,
-        room: String,
-        user: String,
+        room: &RoomId,
+        user: &UserId,
         search: &str,
     ) -> Result<String, SearchError> {
-        let room = self.rooms.entry(room).or_insert_with(|| RoomTab::new());
+        let room = self.rooms.entry(room.to_owned()).or_insert_with(RoomTabContent::new);
         let other = room.find_user(search)?;
-        *(room.users.entry(user).or_insert(0)) += amount;
+        *(room.users.entry(user.to_string()).or_insert(0)) += amount;
         *(room.users.entry(other.clone()).or_insert(0)) -= amount;
         Ok(other)
     }
 
-    pub fn balance(&self, room: &str) -> String {
+    pub fn balance(&self, room: &RoomId) -> String {
         self.rooms
             .get(room)
             .map(|r| r.format_balance())
             .unwrap_or_else(|| "The tab of this room is currently empty.".into())
     }
 
-    pub fn rebalance(&mut self, room: &str) {
+    pub fn rebalance(&mut self, room: &RoomId) {
         if let Some(tab) = self.rooms.get_mut(room) {
             tab.rebalance();
         }
